@@ -8,205 +8,73 @@
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { overflow: hidden; font-family: sans-serif; }
 
-      body {
-        overflow: hidden;
-        font-family: sans-serif;
-      }
-
+      /* Loading */
       #loading-screen {
-        position: fixed;
-        inset: 0;
+        position: fixed; inset: 0;
         background: #1a0a2e;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
         z-index: 9999;
         transition: opacity 0.6s ease;
       }
-
-      #loading-screen.hidden {
-        opacity: 0;
-        pointer-events: none;
-      }
-
-      .loading-logo {
-        font-size: 2.5rem;
-        font-weight: 900;
-        color: #fff;
-        letter-spacing: -1px;
-        margin-bottom: 1rem;
-      }
-
-      .loading-logo span {
-        color: #ff6b35;
-      }
-
-      .loading-sub {
-        font-size: 0.85rem;
-        color: rgba(255,255,255,0.5);
-        letter-spacing: 3px;
-        text-transform: uppercase;
-        margin-bottom: 2.5rem;
-      }
-
-      .loading-bar-wrap {
-        width: 200px;
-        height: 4px;
-        background: rgba(255,255,255,0.1);
-        border-radius: 99px;
-        overflow: hidden;
-      }
-
-      .loading-bar {
-        height: 100%;
-        background: linear-gradient(90deg, #ff6b35, #ffd166);
-        border-radius: 99px;
-        animation: loadpulse 1.8s ease-in-out infinite;
-      }
-
-      @keyframes loadpulse {
-        0% { width: 0%; }
-        60% { width: 90%; }
-        100% { width: 100%; }
-      }
-
-      .loading-tip {
-        margin-top: 2rem;
-        font-size: 0.78rem;
-        color: rgba(255,255,255,0.35);
-        text-align: center;
-        max-width: 260px;
-        line-height: 1.6;
-      }
-
-      /* Video overlay popup */
-      #video-overlay {
-        display: none; /* toggled via JS style.display */
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.82);
-        z-index: 1000;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-      }
-
-      #video-overlay video {
-        max-width: 90vw;
-        max-height: 80vh;
-        border-radius: 16px;
-        box-shadow: 0 0 60px rgba(255,107,53,0.4);
-      }
-
-      #close-video {
-        margin-top: 1.2rem;
-        background: rgba(255,255,255,0.12);
-        border: 1px solid rgba(255,255,255,0.2);
-        color: white;
-        padding: 0.6rem 2rem;
-        border-radius: 99px;
-        font-size: 0.9rem;
-        cursor: pointer;
-        letter-spacing: 1px;
-        transition: background 0.2s;
-      }
-
-      #close-video:hover {
-        background: rgba(255,255,255,0.22);
-      }
+      #loading-screen.hidden { opacity: 0; pointer-events: none; }
+      .loading-logo { font-size: 2.5rem; font-weight: 900; color: #fff; letter-spacing: -1px; margin-bottom: 1rem; }
+      .loading-logo span { color: #ff6b35; }
+      .loading-sub { font-size: 0.85rem; color: rgba(255,255,255,0.5); letter-spacing: 3px; text-transform: uppercase; margin-bottom: 2.5rem; }
+      .loading-bar-wrap { width: 200px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden; }
+      .loading-bar { height: 100%; background: linear-gradient(90deg, #ff6b35, #ffd166); border-radius: 99px; animation: loadpulse 1.8s ease-in-out infinite; }
+      @keyframes loadpulse { 0%{width:0%} 60%{width:90%} 100%{width:100%} }
+      .loading-tip { margin-top: 2rem; font-size: 0.78rem; color: rgba(255,255,255,0.35); text-align: center; max-width: 260px; line-height: 1.6; }
 
       /* Scan hint */
       #scan-hint {
-        position: fixed;
-        bottom: 2rem;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0,0,0,0.6);
-        color: white;
-        padding: 0.6rem 1.4rem;
-        border-radius: 99px;
-        font-size: 0.8rem;
-        letter-spacing: 1px;
-        pointer-events: none;
-        opacity: 1;
-        transition: opacity 0.5s;
-        white-space: nowrap;
+        position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.6); color: white;
+        padding: 0.6rem 1.4rem; border-radius: 99px;
+        font-size: 0.8rem; letter-spacing: 1px;
+        pointer-events: none; opacity: 1; transition: opacity 0.5s; white-space: nowrap;
       }
+      #scan-hint.hidden { opacity: 0; }
 
-      #scan-hint.hidden {
-        opacity: 0;
-      }
-
-      /* ── HTML tap zones (invisible, sit over each AR character) ── */
-      #tap-layer {
-        display: none; /* shown only when target is found */
-        position: fixed;
-        inset: 0;
-        z-index: 10;
-        pointer-events: none; /* layer itself doesn't block, children do */
-      }
-
-      #tap-layer.active {
-        display: block;
-      }
-
+      /* Tap layer */
+      #tap-layer { display: none; position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+      #tap-layer.active { display: block; }
       .tap-zone {
-        position: absolute;
-        pointer-events: all;
-        cursor: pointer;
-        /* Uncomment border below to debug tap zone positions: */
-        /* border: 2px solid red; */
+        position: absolute; pointer-events: all; cursor: pointer;
         border-radius: 12px;
         -webkit-tap-highlight-color: rgba(255,107,53,0.25);
+        /* border: 2px solid red; */ /* ← uncomment to debug tap zone positions */
       }
     </style>
   </head>
   <body>
 
-    <!-- Loading Screen -->
+    <!-- Loading -->
     <div id="loading-screen">
       <div class="loading-logo">Doni <span>AR</span></div>
       <div class="loading-sub">Kids Book Experience</div>
-      <div class="loading-bar-wrap">
-        <div class="loading-bar"></div>
-      </div>
+      <div class="loading-bar-wrap"><div class="loading-bar"></div></div>
       <div class="loading-tip">Point your camera at the book page to begin the magic ✨</div>
-    </div>
-
-    <!-- Video Popup Overlay -->
-    <div id="video-overlay">
-      <video id="popup-video" src="assets/animation.mp4" playsinline controls></video>
-      <button id="close-video">✕ &nbsp; CLOSE</button>
     </div>
 
     <!-- Scan hint -->
     <div id="scan-hint">📖 Scan the book page</div>
 
     <!--
-      HTML Tap Zones — invisible divs positioned over each AR character.
-      These are pure HTML so iOS Safari touch events work perfectly.
-      Positions are percentages of screen width/height.
-      Adjust left/top/width/height after testing on your device.
+      HTML Tap Zones — invisible divs over each character.
+      Tapping triggers the in-AR video plane for that character.
+      Adjust left/top/width/height % to fine-tune after testing on device.
+      Uncomment the border CSS above to see the zones while debugging.
     -->
     <div id="tap-layer">
-      <!-- Char 1: Thumbs up, top-left -->
-      <div class="tap-zone" data-char="1" style="left:5%; top:15%; width:30%; height:30%;"></div>
-      <!-- Char 2: Surprised, center-left -->
+      <div class="tap-zone" data-char="1" style="left:5%;  top:15%; width:30%; height:30%;"></div>
       <div class="tap-zone" data-char="2" style="left:10%; top:38%; width:28%; height:28%;"></div>
-      <!-- Char 3: Peeking, bottom-left -->
-      <div class="tap-zone" data-char="3" style="left:5%; top:62%; width:28%; height:28%;"></div>
-      <!-- Char 4: Pointing, top-right -->
+      <div class="tap-zone" data-char="3" style="left:5%;  top:62%; width:28%; height:28%;"></div>
       <div class="tap-zone" data-char="4" style="left:60%; top:10%; width:35%; height:32%;"></div>
-      <!-- Char 5: Pointing left, center-right -->
       <div class="tap-zone" data-char="5" style="left:55%; top:38%; width:40%; height:28%;"></div>
-      <!-- Char 6: Angry, bottom-right -->
       <div class="tap-zone" data-char="6" style="left:60%; top:62%; width:35%; height:28%;"></div>
     </div>
 
@@ -220,124 +88,78 @@
     >
       <a-assets>
         <img id="still-img" src="assets/still_picture.png" />
-        <video id="ar-video" src="assets/animation.mp4" playsinline preload="auto"></video>
+        <!--
+          One <video> element per character so each plays independently.
+          playsinline is CRITICAL for iOS — without it, video goes fullscreen.
+        -->
+        <video id="vid1" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
+        <video id="vid2" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
+        <video id="vid3" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
+        <video id="vid4" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
+        <video id="vid5" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
+        <video id="vid6" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
       </a-assets>
 
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- TARGET: the whole book page is 1 marker -->
       <a-entity mindar-image-target="targetIndex: 0">
 
         <!--
           COORDINATE SYSTEM:
-          - Center of marker = (0, 0, 0)
-          - marker width = 1 unit
-          - X: left = negative, right = positive
-          - Y: up = positive, down = negative
-          - Z: bring forward (towards camera) = positive
+            Center of marker = (0, 0, 0)
+            X: negative = left, positive = right  (marker width = 1 unit)
+            Y: positive = up,   negative = down
+            Z: positive = closer to camera (above book surface)
 
-          The spread is ~2:1 landscape ratio.
-          Left half = good words (Hebat, Keren, Pintar)
-          Right half = bad words (Jelek, BaDoh, Benci)
+          Each character pair:
+            <a-image> = still placeholder, visible by default
+            <a-video> = in-AR video plane, hidden by default
+              - same x,y as still but z=0.02 (slightly more forward)
+              - width/height: match your video's aspect ratio
+                landscape 16:9 → width=0.40, height=0.225
 
-          Characters estimated from image:
-          1. Thumbs-up top-left    → (-0.35,  0.22)
-          2. Surprised center-left → (-0.05,  0.00)
-          3. Peeking bottom-left   → (-0.35, -0.22)
-          4. Pointing top-right    → ( 0.30,  0.22)
-          5. Pointing center-right → ( 0.30,  0.00)
-          6. Angry bottom-right    → ( 0.30, -0.22)
-
-          Still image is placed at character position, slightly above (z=0.01)
-          Video popup is triggered via JS overlay (not in AR plane) for simplicity
+          When tapped: still hides, video shows + plays in place.
+          When video ends: video hides, still comes back.
         -->
 
-        <!-- CHARACTER 1: Thumbs up top-left (HEBAT) -->
-        <a-image
-          id="char1"
-          src="#still-img"
-          position="-0.35 0.22 0.01"
-          width="0.28"
-          height="0.18"
-          class="ar-still clickable"
-          data-char="1"
-        ></a-image>
+        <!-- ── CHAR 1: Thumbs up / HEBAT (top-left) ── -->
+        <a-image id="still1" src="#still-img" position="-0.35  0.22 0.01" width="0.28" height="0.18"></a-image>
+        <a-video id="video1" src="#vid1"      position="-0.35  0.22 0.02" width="0.40" height="0.225" visible="false"></a-video>
 
-        <!-- CHARACTER 2: Surprised center-left (KEREN) -->
-        <a-image
-          id="char2"
-          src="#still-img"
-          position="-0.05 0.00 0.01"
-          width="0.28"
-          height="0.18"
-          class="ar-still clickable"
-          data-char="2"
-        ></a-image>
+        <!-- ── CHAR 2: Surprised / KEREN (center-left) ── -->
+        <a-image id="still2" src="#still-img" position="-0.05  0.00 0.01" width="0.28" height="0.18"></a-image>
+        <a-video id="video2" src="#vid2"      position="-0.05  0.00 0.02" width="0.40" height="0.225" visible="false"></a-video>
 
-        <!-- CHARACTER 3: Peeking bottom-left (PINTAR) -->
-        <a-image
-          id="char3"
-          src="#still-img"
-          position="-0.35 -0.22 0.01"
-          width="0.28"
-          height="0.18"
-          class="ar-still clickable"
-          data-char="3"
-        ></a-image>
+        <!-- ── CHAR 3: Peeking / PINTAR (bottom-left) ── -->
+        <a-image id="still3" src="#still-img" position="-0.35 -0.22 0.01" width="0.28" height="0.18"></a-image>
+        <a-video id="video3" src="#vid3"      position="-0.35 -0.22 0.02" width="0.40" height="0.225" visible="false"></a-video>
 
-        <!-- CHARACTER 4: Pointing top-right (JELEK) -->
-        <a-image
-          id="char4"
-          src="#still-img"
-          position="0.30 0.22 0.01"
-          width="0.28"
-          height="0.18"
-          class="ar-still clickable"
-          data-char="4"
-        ></a-image>
+        <!-- ── CHAR 4: Pointing / JELEK (top-right) ── -->
+        <a-image id="still4" src="#still-img" position=" 0.30  0.22 0.01" width="0.28" height="0.18"></a-image>
+        <a-video id="video4" src="#vid4"      position=" 0.30  0.22 0.02" width="0.40" height="0.225" visible="false"></a-video>
 
-        <!-- CHARACTER 5: Pointing center-right (BADOH) -->
-        <a-image
-          id="char5"
-          src="#still-img"
-          position="0.30 0.00 0.01"
-          width="0.28"
-          height="0.18"
-          class="ar-still clickable"
-          data-char="5"
-        ></a-image>
+        <!-- ── CHAR 5: Pointing left / BADOH (center-right) ── -->
+        <a-image id="still5" src="#still-img" position=" 0.30  0.00 0.01" width="0.28" height="0.18"></a-image>
+        <a-video id="video5" src="#vid5"      position=" 0.30  0.00 0.02" width="0.40" height="0.225" visible="false"></a-video>
 
-        <!-- CHARACTER 6: Angry bottom-right (BENCI) -->
-        <a-image
-          id="char6"
-          src="#still-img"
-          position="0.30 -0.22 0.01"
-          width="0.28"
-          height="0.18"
-          class="ar-still clickable"
-          data-char="6"
-        ></a-image>
+        <!-- ── CHAR 6: Angry / BENCI (bottom-right) ── -->
+        <a-image id="still6" src="#still-img" position=" 0.30 -0.22 0.01" width="0.28" height="0.18"></a-image>
+        <a-video id="video6" src="#vid6"      position=" 0.30 -0.22 0.02" width="0.40" height="0.225" visible="false"></a-video>
 
       </a-entity>
     </a-scene>
 
     <script>
-      // ─── Loading screen ───────────────────────────────────────────────────────
+      // ── Loading screen ──────────────────────────────────────────────────────
       window.addEventListener('load', () => {
-        setTimeout(() => {
-          document.getElementById('loading-screen').classList.add('hidden');
-        }, 2200);
+        setTimeout(() => document.getElementById('loading-screen').classList.add('hidden'), 2200);
       });
 
-      // ─── Elements ─────────────────────────────────────────────────────────────
       const sceneEl  = document.querySelector('a-scene');
-      const overlay  = document.getElementById('video-overlay');
-      const popupVid = document.getElementById('popup-video');
-      const closeBtn = document.getElementById('close-video');
       const tapLayer = document.getElementById('tap-layer');
       const scanHint = document.getElementById('scan-hint');
 
-      // ─── Show/hide tap layer when marker is found/lost ───────────────────────
+      // ── Show/hide tap layer with marker tracking ────────────────────────────
       sceneEl.addEventListener('loaded', () => {
         const target = document.querySelector('[mindar-image-target]');
 
@@ -349,50 +171,64 @@
         target.addEventListener('targetLost', () => {
           tapLayer.classList.remove('active');
           scanHint.classList.remove('hidden');
+          stopAll(); // pause everything when book is out of frame
         });
       });
 
-      // ─── Open video ───────────────────────────────────────────────────────────
-      function openVideo(charNum) {
-        // iOS Safari requires play() called directly inside a touch handler
-        overlay.style.display = 'flex';
-        popupVid.currentTime = 0;
+      // ── Stop all characters ─────────────────────────────────────────────────
+      let activeChar = null;
 
-        // Use a tiny timeout so display:flex renders before play() is called
-        setTimeout(() => {
-          popupVid.play().catch(err => console.warn('Video play error:', err));
-        }, 50);
-
-        console.log('Tapped character:', charNum);
+      function stopAll() {
+        for (let i = 1; i <= 6; i++) {
+          const vEl   = document.getElementById('vid'   + i);
+          const video = document.getElementById('video' + i);
+          const still = document.getElementById('still' + i);
+          if (!vEl || !video || !still) continue;
+          vEl.pause();
+          vEl.currentTime = 0;
+          video.setAttribute('visible', 'false');
+          still.setAttribute('visible', 'true');
+        }
+        activeChar = null;
       }
 
-      // ─── Close video ──────────────────────────────────────────────────────────
-      closeBtn.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        closeVideo();
-      });
-      closeBtn.addEventListener('click', closeVideo);
+      // ── Play a character's video in AR ──────────────────────────────────────
+      function playChar(n) {
+        // Stop whoever was playing before
+        if (activeChar !== null && activeChar !== n) stopAll();
 
-      function closeVideo() {
-        overlay.style.display = 'none';
-        popupVid.pause();
-        popupVid.currentTime = 0;
+        const vEl   = document.getElementById('vid'   + n);
+        const video = document.getElementById('video' + n);
+        const still = document.getElementById('still' + n);
+
+        // Swap still → video plane
+        still.setAttribute('visible', 'false');
+        video.setAttribute('visible', 'true');
+        activeChar = n;
+
+        // Play — must be called inside the touch handler for iOS
+        vEl.currentTime = 0;
+        vEl.play().catch(err => console.warn('Play error char ' + n + ':', err));
+
+        // Restore still when done
+        vEl.onended = () => {
+          video.setAttribute('visible', 'false');
+          still.setAttribute('visible', 'true');
+          activeChar = null;
+        };
       }
 
-      // ─── Wire up tap zones (iOS-safe: touchend + preventDefault) ─────────────
+      // ── Wire tap zones (iOS-safe touchend) ─────────────────────────────────
       document.querySelectorAll('.tap-zone').forEach(zone => {
-        const charNum = zone.getAttribute('data-char');
+        const n = parseInt(zone.getAttribute('data-char'));
 
-        // touchend is the most reliable on iOS Safari
         zone.addEventListener('touchend', (e) => {
-          e.preventDefault(); // prevents ghost click + scroll
-          openVideo(charNum);
+          e.preventDefault(); // stops ghost click and scroll
+          playChar(n);
         }, { passive: false });
 
-        // fallback for desktop testing
-        zone.addEventListener('click', () => {
-          openVideo(charNum);
-        });
+        // Desktop fallback
+        zone.addEventListener('click', () => playChar(n));
       });
     </script>
   </body>
