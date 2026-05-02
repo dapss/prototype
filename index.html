@@ -11,12 +11,9 @@
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { overflow: hidden; font-family: sans-serif; }
 
-      /* Loading */
       #loading-screen {
-        position: fixed; inset: 0;
-        background: #1a0a2e;
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
+        position: fixed; inset: 0; background: #1a0a2e;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
         z-index: 9999; transition: opacity 0.6s ease;
       }
       #loading-screen.hidden { opacity: 0; pointer-events: none; }
@@ -28,41 +25,27 @@
       @keyframes loadpulse { 0%{width:0%} 60%{width:90%} 100%{width:100%} }
       .loading-tip { margin-top: 2rem; font-size: 0.78rem; color: rgba(255,255,255,0.35); text-align: center; max-width: 260px; line-height: 1.6; }
 
-      /* Scan hint */
       #scan-hint {
         position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
-        background: rgba(0,0,0,0.6); color: white;
-        padding: 0.6rem 1.4rem; border-radius: 99px;
-        font-size: 0.8rem; letter-spacing: 1px;
-        pointer-events: none; opacity: 1; transition: opacity 0.5s; white-space: nowrap;
-        z-index: 20;
+        background: rgba(0,0,0,0.6); color: white; padding: 0.6rem 1.4rem;
+        border-radius: 99px; font-size: 0.8rem; letter-spacing: 1px;
+        pointer-events: none; opacity: 1; transition: opacity 0.5s; white-space: nowrap; z-index: 20;
       }
       #scan-hint.hidden { opacity: 0; }
 
-      /* Tap layer — sits above the AR canvas, below loading screen */
-      #tap-layer {
-        display: none;
-        position: fixed; inset: 0;
-        z-index: 10;
-        pointer-events: none; /* layer is pass-through; only .tap-zone children catch touches */
-      }
+      #tap-layer { display: none; position: fixed; inset: 0; z-index: 10; pointer-events: none; }
       #tap-layer.active { display: block; }
-
       .tap-zone {
-        position: absolute;
-        pointer-events: all;
-        cursor: pointer;
-        border-radius: 50%; /* circle hitbox feels natural over a character */
-        transform: translate(-50%, -50%); /* center the div on the projected point */
-        -webkit-tap-highlight-color: rgba(255, 107, 53, 0.3);
-        /* Uncomment to debug — shows a red circle on each character: */
-        /* background: rgba(255,0,0,0.3); border: 2px solid red; */
+        position: absolute; pointer-events: all; cursor: pointer;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        -webkit-tap-highlight-color: rgba(255,107,53,0.3);
+        /* border: 2px solid red; */ /* ← uncomment to debug */
       }
     </style>
   </head>
   <body>
 
-    <!-- Loading -->
     <div id="loading-screen">
       <div class="loading-logo">Doni <span>AR</span></div>
       <div class="loading-sub">Kids Book Experience</div>
@@ -70,14 +53,8 @@
       <div class="loading-tip">Point your camera at the book page to begin the magic ✨</div>
     </div>
 
-    <!-- Scan hint -->
     <div id="scan-hint">📖 Scan the book page</div>
 
-    <!--
-      Tap zones: position + size are set dynamically every frame via JS.
-      data-char matches the character number (1–6).
-      The transform: translate(-50%,-50%) centers them on the projected 3D point.
-    -->
     <div id="tap-layer">
       <div class="tap-zone" id="zone1" data-char="1"></div>
       <div class="tap-zone" id="zone2" data-char="2"></div>
@@ -87,7 +64,52 @@
       <div class="tap-zone" id="zone6" data-char="6"></div>
     </div>
 
-    <!-- AR Scene -->
+    <!--
+      pose-smoother component must be registered BEFORE <a-scene> is parsed.
+      It intercepts the raw MindAR matrix every tick and lerps both position
+      and quaternion (rotation), then writes the smoothed result back.
+      This stabilises everything — stills, videos, anchors — at the source,
+      so the AR visuals and tap zones are all smooth regardless of distance.
+    -->
+    <script>
+      AFRAME.registerComponent('pose-smoother', {
+        schema: {
+          // Lower = smoother / more lag. 0.07 is a good default.
+          // Try 0.05 for very close-up use, 0.10 for faster response.
+          factor: { type: 'number', default: 0.07 }
+        },
+        init() {
+          const T = AFRAME.THREE;
+          this.smoothPos  = new T.Vector3();
+          this.smoothQuat = new T.Quaternion();
+          this.rawPos     = new T.Vector3();
+          this.rawQuat    = new T.Quaternion();
+          this.rawScale   = new T.Vector3();
+          this.ready      = false;
+        },
+        tick() {
+          const obj = this.el.object3D;
+          if (!obj.visible) {
+            this.ready = false; // reset so next detection snaps, not slides
+            return;
+          }
+          obj.matrix.decompose(this.rawPos, this.rawQuat, this.rawScale);
+          if (!this.ready) {
+            this.smoothPos.copy(this.rawPos);
+            this.smoothQuat.copy(this.rawQuat);
+            this.ready = true;
+          } else {
+            const f = this.data.factor;
+            this.smoothPos.lerp(this.rawPos, f);
+            this.smoothQuat.slerp(this.rawQuat, f); // slerp = correct lerp for rotations
+          }
+          obj.position.copy(this.smoothPos);
+          obj.quaternion.copy(this.smoothQuat);
+          obj.scale.copy(this.rawScale); // keep MindAR's scale (marker size)
+        }
+      });
+    </script>
+
     <a-scene
       mindar-image="imageTargetSrc: assets/marker.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;"
       color-space="sRGB"
@@ -107,25 +129,12 @@
 
       <a-camera id="ar-cam" position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <a-entity mindar-image-target="targetIndex: 0">
-
-        <!--
-          AR COORDINATE SYSTEM:
-            (0,0,0) = center of marker
-            X: negative=left  positive=right   (marker width = 1 unit)
-            Y: positive=up    negative=down
-            Z: positive=toward camera
-
-          Each character:
-            <a-image> still placeholder — visible by default
-            <a-video> video plane       — hidden by default, shown on tap
-              rotation="90 0 0" makes it stand upright (billboard)
-              Y is raised so video rises above the character
-
-          The invisible <a-entity id="anchor-N"> at each character's
-          position is what we project to screen coords every frame.
-          It has no visual — it's just a 3D point we can read from JS.
-        -->
+      <!--
+        pose-smoother is attached to the TARGET entity — the parent of all AR content.
+        Smoothing the parent smooths everything inside it (stills, videos, anchors).
+        factor="0.07" — tune lower for smoother, higher for snappier.
+      -->
+      <a-entity mindar-image-target="targetIndex: 0" pose-smoother="factor: 0.07">
 
         <!-- ── CHAR 1: Thumbs up / HEBAT (top-left) ── -->
         <a-entity id="anchor1" position="-0.35  0.22  0.01"></a-entity>
@@ -161,7 +170,6 @@
     </a-scene>
 
     <script>
-      // ── Loading screen ────────────────────────────────────────────────────────
       window.addEventListener('load', () => {
         setTimeout(() => document.getElementById('loading-screen').classList.add('hidden'), 2200);
       });
@@ -171,44 +179,32 @@
       const scanHint = document.getElementById('scan-hint');
       let   isTracking = false;
 
-      // ── 3D → 2D projection + smoothing loop ─────────────────────────────────
-      // Each zone has a "current" smoothed position that lerps toward the
-      // raw projected position every frame. This eliminates tracker jitter
-      // while still following the character accurately.
-
+      // ── 3D → 2D projection (reads already-smoothed world positions) ──────────
       const THREE  = AFRAME.THREE;
       const tmpVec = new THREE.Vector3();
       const camPos = new THREE.Vector3();
       const ancPos = new THREE.Vector3();
 
-      // LERP factor: 0.0 = frozen, 1.0 = instant (no smoothing)
-      // 0.15 feels smooth but still responsive — raise to 0.25 if too laggy
-      const LERP = 0.90;
-
-      // Smoothed state per zone
+      // Secondary 2D lerp on top of the 3D smoothing — keeps tap zones
+      // extra stable even if there's any residual screen-space jitter.
+      const LERP2D = 0.25;
       const smooth = {};
-      for (let i = 1; i <= 6; i++) {
-        smooth[i] = { x: -9999, y: -9999, size: 100, init: false };
-      }
+      for (let i = 1; i <= 6; i++) smooth[i] = { x: 0, y: 0, size: 100, init: false };
 
       function projectToScreen(anchorEl, camera) {
         anchorEl.object3D.getWorldPosition(ancPos);
         tmpVec.copy(ancPos);
         tmpVec.project(camera.object3D.children[0] || camera.object3D);
-
-        const x    = ( tmpVec.x + 1) / 2 * window.innerWidth;
-        const y    = (-tmpVec.y + 1) / 2 * window.innerHeight;
-
+        const x = ( tmpVec.x + 1) / 2 * window.innerWidth;
+        const y = (-tmpVec.y + 1) / 2 * window.innerHeight;
         camera.object3D.getWorldPosition(camPos);
         const dist = camPos.distanceTo(ancPos);
         const size = Math.min(Math.max(200 / dist, 60), 400);
-
         return { x, y, size };
       }
 
       function updateTapZones() {
         if (!isTracking) return;
-
         const camera = document.getElementById('ar-cam');
         if (!camera || !camera.object3D) return;
 
@@ -221,14 +217,11 @@
           const s   = smooth[i];
 
           if (!s.init) {
-            // First frame: snap immediately so there's no slide-in from (0,0)
-            s.x = raw.x; s.y = raw.y; s.size = raw.size;
-            s.init = true;
+            s.x = raw.x; s.y = raw.y; s.size = raw.size; s.init = true;
           } else {
-            // Lerp toward raw position each frame
-            s.x    += (raw.x    - s.x)    * LERP;
-            s.y    += (raw.y    - s.y)    * LERP;
-            s.size += (raw.size - s.size) * LERP;
+            s.x    += (raw.x    - s.x)    * LERP2D;
+            s.y    += (raw.y    - s.y)    * LERP2D;
+            s.size += (raw.size - s.size) * LERP2D;
           }
 
           zone.style.left   = s.x    + 'px';
@@ -236,11 +229,10 @@
           zone.style.width  = s.size + 'px';
           zone.style.height = s.size + 'px';
         }
-
         requestAnimationFrame(updateTapZones);
       }
 
-      // ── Marker tracking events ────────────────────────────────────────────────
+      // ── Marker tracking ───────────────────────────────────────────────────────
       sceneEl.addEventListener('loaded', () => {
         const target = document.querySelector('[mindar-image-target]');
 
@@ -248,20 +240,19 @@
           isTracking = true;
           tapLayer.classList.add('active');
           scanHint.classList.add('hidden');
-          requestAnimationFrame(updateTapZones); // start projection loop
+          requestAnimationFrame(updateTapZones);
         });
 
         target.addEventListener('targetLost', () => {
           isTracking = false;
           tapLayer.classList.remove('active');
           scanHint.classList.remove('hidden');
-          // Reset smooth state so zones snap cleanly on next detection
           for (let i = 1; i <= 6; i++) smooth[i].init = false;
           stopAll();
         });
       });
 
-      // ── Stop all characters ───────────────────────────────────────────────────
+      // ── Stop all ──────────────────────────────────────────────────────────────
       let activeChar = null;
 
       function stopAll() {
@@ -270,29 +261,24 @@
           const video = document.getElementById('video' + i);
           const still = document.getElementById('still' + i);
           if (!vEl || !video || !still) continue;
-          vEl.pause();
-          vEl.currentTime = 0;
+          vEl.pause(); vEl.currentTime = 0;
           video.setAttribute('visible', 'false');
           still.setAttribute('visible', 'true');
         }
         activeChar = null;
       }
 
-      // ── Play a character's video in AR ────────────────────────────────────────
+      // ── Play character video in AR ────────────────────────────────────────────
       function playChar(n) {
         if (activeChar !== null && activeChar !== n) stopAll();
-
         const vEl   = document.getElementById('vid'   + n);
         const video = document.getElementById('video' + n);
         const still = document.getElementById('still' + n);
-
         still.setAttribute('visible', 'false');
         video.setAttribute('visible', 'true');
         activeChar = n;
-
         vEl.currentTime = 0;
-        vEl.play().catch(err => console.warn('Play error char ' + n + ':', err));
-
+        vEl.play().catch(err => console.warn('Play error:', err));
         vEl.onended = () => {
           video.setAttribute('visible', 'false');
           still.setAttribute('visible', 'true');
@@ -300,15 +286,13 @@
         };
       }
 
-      // ── Wire tap zones — iOS-safe touchend ───────────────────────────────────
+      // ── Tap zones ─────────────────────────────────────────────────────────────
       document.querySelectorAll('.tap-zone').forEach(zone => {
         const n = parseInt(zone.getAttribute('data-char'));
-
         zone.addEventListener('touchend', (e) => {
           e.preventDefault();
           playChar(n);
         }, { passive: false });
-
         zone.addEventListener('click', () => playChar(n));
       });
     </script>
