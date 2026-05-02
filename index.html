@@ -17,8 +17,7 @@
         background: #1a0a2e;
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
-        z-index: 9999;
-        transition: opacity 0.6s ease;
+        z-index: 9999; transition: opacity 0.6s ease;
       }
       #loading-screen.hidden { opacity: 0; pointer-events: none; }
       .loading-logo { font-size: 2.5rem; font-weight: 900; color: #fff; letter-spacing: -1px; margin-bottom: 1rem; }
@@ -36,17 +35,28 @@
         padding: 0.6rem 1.4rem; border-radius: 99px;
         font-size: 0.8rem; letter-spacing: 1px;
         pointer-events: none; opacity: 1; transition: opacity 0.5s; white-space: nowrap;
+        z-index: 20;
       }
       #scan-hint.hidden { opacity: 0; }
 
-      /* Tap layer */
-      #tap-layer { display: none; position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+      /* Tap layer — sits above the AR canvas, below loading screen */
+      #tap-layer {
+        display: none;
+        position: fixed; inset: 0;
+        z-index: 10;
+        pointer-events: none; /* layer is pass-through; only .tap-zone children catch touches */
+      }
       #tap-layer.active { display: block; }
+
       .tap-zone {
-        position: absolute; pointer-events: all; cursor: pointer;
-        border-radius: 12px;
-        -webkit-tap-highlight-color: rgba(255,107,53,0.25);
-        /* border: 2px solid red; */ /* ← uncomment to debug tap zone positions */
+        position: absolute;
+        pointer-events: all;
+        cursor: pointer;
+        border-radius: 50%; /* circle hitbox feels natural over a character */
+        transform: translate(-50%, -50%); /* center the div on the projected point */
+        -webkit-tap-highlight-color: rgba(255, 107, 53, 0.3);
+        /* Uncomment to debug — shows a red circle on each character: */
+        /* background: rgba(255,0,0,0.3); border: 2px solid red; */
       }
     </style>
   </head>
@@ -64,18 +74,17 @@
     <div id="scan-hint">📖 Scan the book page</div>
 
     <!--
-      HTML Tap Zones — invisible divs over each character.
-      Tapping triggers the in-AR video plane for that character.
-      Adjust left/top/width/height % to fine-tune after testing on device.
-      Uncomment the border CSS above to see the zones while debugging.
+      Tap zones: position + size are set dynamically every frame via JS.
+      data-char matches the character number (1–6).
+      The transform: translate(-50%,-50%) centers them on the projected 3D point.
     -->
     <div id="tap-layer">
-      <div class="tap-zone" data-char="1" style="left:5%;  top:15%; width:30%; height:30%;"></div>
-      <div class="tap-zone" data-char="2" style="left:10%; top:38%; width:28%; height:28%;"></div>
-      <div class="tap-zone" data-char="3" style="left:5%;  top:62%; width:28%; height:28%;"></div>
-      <div class="tap-zone" data-char="4" style="left:60%; top:10%; width:35%; height:32%;"></div>
-      <div class="tap-zone" data-char="5" style="left:55%; top:38%; width:40%; height:28%;"></div>
-      <div class="tap-zone" data-char="6" style="left:60%; top:62%; width:35%; height:28%;"></div>
+      <div class="tap-zone" id="zone1" data-char="1"></div>
+      <div class="tap-zone" id="zone2" data-char="2"></div>
+      <div class="tap-zone" id="zone3" data-char="3"></div>
+      <div class="tap-zone" id="zone4" data-char="4"></div>
+      <div class="tap-zone" id="zone5" data-char="5"></div>
+      <div class="tap-zone" id="zone6" data-char="6"></div>
     </div>
 
     <!-- AR Scene -->
@@ -88,10 +97,6 @@
     >
       <a-assets>
         <img id="still-img" src="assets/still_picture.png" />
-        <!--
-          One <video> element per character so each plays independently.
-          playsinline is CRITICAL for iOS — without it, video goes fullscreen.
-        -->
         <video id="vid1" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
         <video id="vid2" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
         <video id="vid3" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
@@ -100,69 +105,63 @@
         <video id="vid6" src="assets/animation.mp4" playsinline preload="auto" crossorigin="anonymous"></video>
       </a-assets>
 
-      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-camera id="ar-cam" position="0 0 0" look-controls="enabled: false"></a-camera>
 
       <a-entity mindar-image-target="targetIndex: 0">
 
         <!--
-          COORDINATE SYSTEM:
-            Center of marker = (0, 0, 0)
-            X: negative = left, positive = right  (marker width = 1 unit)
-            Y: positive = up,   negative = down
-            Z: positive = closer to camera (above book surface)
+          AR COORDINATE SYSTEM:
+            (0,0,0) = center of marker
+            X: negative=left  positive=right   (marker width = 1 unit)
+            Y: positive=up    negative=down
+            Z: positive=toward camera
 
-          Each character pair:
-            <a-image> = still placeholder, visible by default
-            <a-video> = in-AR video plane, hidden by default
-              - same x,y as still but z=0.02 (slightly more forward)
-              - width/height: match your video's aspect ratio
-                landscape 16:9 → width=0.40, height=0.225
+          Each character:
+            <a-image> still placeholder — visible by default
+            <a-video> video plane       — hidden by default, shown on tap
+              rotation="90 0 0" makes it stand upright (billboard)
+              Y is raised so video rises above the character
 
-          When tapped: still hides, video shows + plays in place.
-          When video ends: video hides, still comes back.
-        -->
-
-        <!--
-          VIDEO ROTATION EXPLAINED:
-          By default a-video lays flat on the book (like a sticker).
-          rotation="-90 0 0" stands it upright like a billboard.
-          The Y position is raised so the video floats above the character.
-          Z is pulled forward slightly so it doesn't clip into the book.
-
-          Position:  x  (same as still)
-                     y  (raised up — increase this to make it float higher)
-                     z  (same as still, just above book surface)
+          The invisible <a-entity id="anchor-N"> at each character's
+          position is what we project to screen coords every frame.
+          It has no visual — it's just a 3D point we can read from JS.
         -->
 
         <!-- ── CHAR 1: Thumbs up / HEBAT (top-left) ── -->
-        <a-image id="still1" src="#still-img" position="-0.35  0.22  0.01" width="0.28" height="0.18"></a-image>
-        <a-video id="video1" src="#vid1"      position="-0.35  0.32  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
+        <a-entity id="anchor1" position="-0.35  0.22  0.01"></a-entity>
+        <a-image  id="still1"  src="#still-img" position="-0.35  0.22  0.01" width="0.28" height="0.18"></a-image>
+        <a-video  id="video1"  src="#vid1" position="-0.35  0.32  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
 
         <!-- ── CHAR 2: Surprised / KEREN (center-left) ── -->
-        <a-image id="still2" src="#still-img" position="-0.05  0.00  0.01" width="0.28" height="0.18"></a-image>
-        <a-video id="video2" src="#vid2"      position="-0.05  0.10  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
+        <a-entity id="anchor2" position="-0.05  0.00  0.01"></a-entity>
+        <a-image  id="still2"  src="#still-img" position="-0.05  0.00  0.01" width="0.28" height="0.18"></a-image>
+        <a-video  id="video2"  src="#vid2" position="-0.05  0.10  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
 
         <!-- ── CHAR 3: Peeking / PINTAR (bottom-left) ── -->
-        <a-image id="still3" src="#still-img" position="-0.35 -0.22  0.01" width="0.28" height="0.18"></a-image>
-        <a-video id="video3" src="#vid3"      position="-0.35 -0.12  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
+        <a-entity id="anchor3" position="-0.35 -0.22  0.01"></a-entity>
+        <a-image  id="still3"  src="#still-img" position="-0.35 -0.22  0.01" width="0.28" height="0.18"></a-image>
+        <a-video  id="video3"  src="#vid3" position="-0.35 -0.12  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
 
         <!-- ── CHAR 4: Pointing / JELEK (top-right) ── -->
-        <a-image id="still4" src="#still-img" position=" 0.30  0.22  0.01" width="0.28" height="0.18"></a-image>
-        <a-video id="video4" src="#vid4"      position=" 0.30  0.32  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
+        <a-entity id="anchor4" position=" 0.30  0.22  0.01"></a-entity>
+        <a-image  id="still4"  src="#still-img" position=" 0.30  0.22  0.01" width="0.28" height="0.18"></a-image>
+        <a-video  id="video4"  src="#vid4" position=" 0.30  0.32  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
 
         <!-- ── CHAR 5: Pointing left / BADOH (center-right) ── -->
-        <a-image id="still5" src="#still-img" position=" 0.30  0.00  0.01" width="0.28" height="0.18"></a-image>
-        <a-video id="video5" src="#vid5"      position=" 0.30  0.10  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
+        <a-entity id="anchor5" position=" 0.30  0.00  0.01"></a-entity>
+        <a-image  id="still5"  src="#still-img" position=" 0.30  0.00  0.01" width="0.28" height="0.18"></a-image>
+        <a-video  id="video5"  src="#vid5" position=" 0.30  0.10  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
 
         <!-- ── CHAR 6: Angry / BENCI (bottom-right) ── -->
-        <a-image id="still6" src="#still-img" position=" 0.30 -0.22  0.01" width="0.28" height="0.18"></a-image>
-        <a-video id="video6" src="#vid6"      position=" 0.30 -0.12  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
+        <a-entity id="anchor6" position=" 0.30 -0.22  0.01"></a-entity>
+        <a-image  id="still6"  src="#still-img" position=" 0.30 -0.22  0.01" width="0.28" height="0.18"></a-image>
+        <a-video  id="video6"  src="#vid6" position=" 0.30 -0.12  0.01" width="0.40" height="0.225" rotation="90 0 0" visible="false"></a-video>
 
       </a-entity>
     </a-scene>
 
     <script>
-      // ── Loading screen ──────────────────────────────────────────────────────
+      // ── Loading screen ────────────────────────────────────────────────────────
       window.addEventListener('load', () => {
         setTimeout(() => document.getElementById('loading-screen').classList.add('hidden'), 2200);
       });
@@ -170,24 +169,87 @@
       const sceneEl  = document.querySelector('a-scene');
       const tapLayer = document.getElementById('tap-layer');
       const scanHint = document.getElementById('scan-hint');
+      let   isTracking = false;
 
-      // ── Show/hide tap layer with marker tracking ────────────────────────────
+      // ── 3D → 2D projection loop ───────────────────────────────────────────────
+      // Every animation frame we:
+      //   1. Get the world position of each anchor entity
+      //   2. Project it through the camera to get NDC (-1..1)
+      //   3. Convert NDC to screen pixels
+      //   4. Move the tap zone div to that pixel position
+      //   5. Scale the tap zone size based on distance (closer = bigger hitbox)
+
+      const THREE = AFRAME.THREE;
+      const tmpVec = new THREE.Vector3();
+
+      function projectToScreen(anchorEl, camera) {
+        // Get the anchor's world position
+        anchorEl.object3D.getWorldPosition(tmpVec);
+
+        // Project into camera clip space (-1 to +1)
+        tmpVec.project(camera.object3D.children[0] || camera.object3D);
+
+        // Convert to CSS pixels (top-left origin)
+        const x = ( tmpVec.x + 1) / 2 * window.innerWidth;
+        const y = (-tmpVec.y + 1) / 2 * window.innerHeight;
+
+        // Distance-based size: closer = bigger tap area
+        // tmpVec.z after project is in NDC; we use the raw Z before project
+        // Instead, compute distance from camera to anchor in world space
+        const camPos = new THREE.Vector3();
+        camera.object3D.getWorldPosition(camPos);
+        const anchorPos = new THREE.Vector3();
+        anchorEl.object3D.getWorldPosition(anchorPos);
+        const dist = camPos.distanceTo(anchorPos);
+
+        // Empirically: at dist=3 → size ~100px, at dist=1 → size ~300px
+        const size = Math.min(Math.max(200 / dist, 60), 400);
+
+        return { x, y, size };
+      }
+
+      function updateTapZones() {
+        if (!isTracking) return;
+
+        const camera = document.getElementById('ar-cam');
+        if (!camera || !camera.object3D) return;
+
+        for (let i = 1; i <= 6; i++) {
+          const anchor = document.getElementById('anchor' + i);
+          const zone   = document.getElementById('zone'   + i);
+          if (!anchor || !zone) continue;
+
+          const { x, y, size } = projectToScreen(anchor, camera);
+
+          zone.style.left   = x + 'px';
+          zone.style.top    = y + 'px';
+          zone.style.width  = size + 'px';
+          zone.style.height = size + 'px';
+        }
+
+        requestAnimationFrame(updateTapZones);
+      }
+
+      // ── Marker tracking events ────────────────────────────────────────────────
       sceneEl.addEventListener('loaded', () => {
         const target = document.querySelector('[mindar-image-target]');
 
         target.addEventListener('targetFound', () => {
+          isTracking = true;
           tapLayer.classList.add('active');
           scanHint.classList.add('hidden');
+          requestAnimationFrame(updateTapZones); // start projection loop
         });
 
         target.addEventListener('targetLost', () => {
+          isTracking = false;
           tapLayer.classList.remove('active');
           scanHint.classList.remove('hidden');
-          stopAll(); // pause everything when book is out of frame
+          stopAll();
         });
       });
 
-      // ── Stop all characters ─────────────────────────────────────────────────
+      // ── Stop all characters ───────────────────────────────────────────────────
       let activeChar = null;
 
       function stopAll() {
@@ -204,25 +266,21 @@
         activeChar = null;
       }
 
-      // ── Play a character's video in AR ──────────────────────────────────────
+      // ── Play a character's video in AR ────────────────────────────────────────
       function playChar(n) {
-        // Stop whoever was playing before
         if (activeChar !== null && activeChar !== n) stopAll();
 
         const vEl   = document.getElementById('vid'   + n);
         const video = document.getElementById('video' + n);
         const still = document.getElementById('still' + n);
 
-        // Swap still → video plane
         still.setAttribute('visible', 'false');
         video.setAttribute('visible', 'true');
         activeChar = n;
 
-        // Play — must be called inside the touch handler for iOS
         vEl.currentTime = 0;
         vEl.play().catch(err => console.warn('Play error char ' + n + ':', err));
 
-        // Restore still when done
         vEl.onended = () => {
           video.setAttribute('visible', 'false');
           still.setAttribute('visible', 'true');
@@ -230,16 +288,15 @@
         };
       }
 
-      // ── Wire tap zones (iOS-safe touchend) ─────────────────────────────────
+      // ── Wire tap zones — iOS-safe touchend ───────────────────────────────────
       document.querySelectorAll('.tap-zone').forEach(zone => {
         const n = parseInt(zone.getAttribute('data-char'));
 
         zone.addEventListener('touchend', (e) => {
-          e.preventDefault(); // stops ghost click and scroll
+          e.preventDefault();
           playChar(n);
         }, { passive: false });
 
-        // Desktop fallback
         zone.addEventListener('click', () => playChar(n));
       });
     </script>
