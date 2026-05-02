@@ -88,7 +88,7 @@
 
       /* Video overlay popup */
       #video-overlay {
-        display: none;
+        display: none; /* toggled via JS style.display */
         position: fixed;
         inset: 0;
         background: rgba(0,0,0,0.82);
@@ -96,10 +96,6 @@
         align-items: center;
         justify-content: center;
         flex-direction: column;
-      }
-
-      #video-overlay.active {
-        display: flex;
       }
 
       #video-overlay video {
@@ -147,6 +143,29 @@
       #scan-hint.hidden {
         opacity: 0;
       }
+
+      /* ── HTML tap zones (invisible, sit over each AR character) ── */
+      #tap-layer {
+        display: none; /* shown only when target is found */
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        pointer-events: none; /* layer itself doesn't block, children do */
+      }
+
+      #tap-layer.active {
+        display: block;
+      }
+
+      .tap-zone {
+        position: absolute;
+        pointer-events: all;
+        cursor: pointer;
+        /* Uncomment border below to debug tap zone positions: */
+        /* border: 2px solid red; */
+        border-radius: 12px;
+        -webkit-tap-highlight-color: rgba(255,107,53,0.25);
+      }
     </style>
   </head>
   <body>
@@ -169,6 +188,27 @@
 
     <!-- Scan hint -->
     <div id="scan-hint">📖 Scan the book page</div>
+
+    <!--
+      HTML Tap Zones — invisible divs positioned over each AR character.
+      These are pure HTML so iOS Safari touch events work perfectly.
+      Positions are percentages of screen width/height.
+      Adjust left/top/width/height after testing on your device.
+    -->
+    <div id="tap-layer">
+      <!-- Char 1: Thumbs up, top-left -->
+      <div class="tap-zone" data-char="1" style="left:5%; top:15%; width:30%; height:30%;"></div>
+      <!-- Char 2: Surprised, center-left -->
+      <div class="tap-zone" data-char="2" style="left:10%; top:38%; width:28%; height:28%;"></div>
+      <!-- Char 3: Peeking, bottom-left -->
+      <div class="tap-zone" data-char="3" style="left:5%; top:62%; width:28%; height:28%;"></div>
+      <!-- Char 4: Pointing, top-right -->
+      <div class="tap-zone" data-char="4" style="left:60%; top:10%; width:35%; height:32%;"></div>
+      <!-- Char 5: Pointing left, center-right -->
+      <div class="tap-zone" data-char="5" style="left:55%; top:38%; width:40%; height:28%;"></div>
+      <!-- Char 6: Angry, bottom-right -->
+      <div class="tap-zone" data-char="6" style="left:60%; top:62%; width:35%; height:28%;"></div>
+    </div>
 
     <!-- AR Scene -->
     <a-scene
@@ -289,79 +329,71 @@
         }, 2200);
       });
 
-      // ─── Scan hint hide on target found ──────────────────────────────────────
-      const sceneEl = document.querySelector('a-scene');
+      // ─── Elements ─────────────────────────────────────────────────────────────
+      const sceneEl  = document.querySelector('a-scene');
+      const overlay  = document.getElementById('video-overlay');
+      const popupVid = document.getElementById('popup-video');
+      const closeBtn = document.getElementById('close-video');
+      const tapLayer = document.getElementById('tap-layer');
+      const scanHint = document.getElementById('scan-hint');
+
+      // ─── Show/hide tap layer when marker is found/lost ───────────────────────
       sceneEl.addEventListener('loaded', () => {
         const target = document.querySelector('[mindar-image-target]');
+
         target.addEventListener('targetFound', () => {
-          document.getElementById('scan-hint').classList.add('hidden');
+          tapLayer.classList.add('active');
+          scanHint.classList.add('hidden');
         });
+
         target.addEventListener('targetLost', () => {
-          document.getElementById('scan-hint').classList.remove('hidden');
+          tapLayer.classList.remove('active');
+          scanHint.classList.remove('hidden');
         });
       });
 
-      // ─── Click / tap handling for AR stills ──────────────────────────────────
-      const overlay   = document.getElementById('video-overlay');
-      const popupVid  = document.getElementById('popup-video');
-      const closeBtn  = document.getElementById('close-video');
-
-      function openVideo() {
-        overlay.classList.add('active');
+      // ─── Open video ───────────────────────────────────────────────────────────
+      function openVideo(charNum) {
+        // iOS Safari requires play() called directly inside a touch handler
+        overlay.style.display = 'flex';
         popupVid.currentTime = 0;
-        popupVid.play();
+
+        // Use a tiny timeout so display:flex renders before play() is called
+        setTimeout(() => {
+          popupVid.play().catch(err => console.warn('Video play error:', err));
+        }, 50);
+
+        console.log('Tapped character:', charNum);
       }
 
-      closeBtn.addEventListener('click', () => {
-        overlay.classList.remove('active');
+      // ─── Close video ──────────────────────────────────────────────────────────
+      closeBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        closeVideo();
+      });
+      closeBtn.addEventListener('click', closeVideo);
+
+      function closeVideo() {
+        overlay.style.display = 'none';
         popupVid.pause();
         popupVid.currentTime = 0;
-      });
+      }
 
-      // A-Frame click via raycaster cursor
-      // We use a cursor on the camera that emits click events
-      sceneEl.addEventListener('loaded', () => {
-        // Add cursor / raycaster to camera
-        const cam = document.querySelector('a-camera');
+      // ─── Wire up tap zones (iOS-safe: touchend + preventDefault) ─────────────
+      document.querySelectorAll('.tap-zone').forEach(zone => {
+        const charNum = zone.getAttribute('data-char');
 
-        const cursor = document.createElement('a-cursor');
-        cursor.setAttribute('fuse', false);
-        cursor.setAttribute('raycaster', 'objects: .clickable');
-        cursor.setAttribute('color', '#ff6b35');
-        cursor.setAttribute('opacity', '0.7');
-        cam.appendChild(cursor);
+        // touchend is the most reliable on iOS Safari
+        zone.addEventListener('touchend', (e) => {
+          e.preventDefault(); // prevents ghost click + scroll
+          openVideo(charNum);
+        }, { passive: false });
 
-        // Listen for clicks on each still image
-        document.querySelectorAll('.ar-still').forEach(el => {
-          el.addEventListener('click', () => {
-            openVideo();
-          });
+        // fallback for desktop testing
+        zone.addEventListener('click', () => {
+          openVideo(charNum);
         });
       });
-
-      // Also handle touch/click directly on canvas as fallback
-      // (useful on mobile where raycaster can be finicky)
-      document.querySelector('canvas') && document.querySelector('canvas').addEventListener('click', handleCanvasClick);
-      sceneEl.addEventListener('loaded', () => {
-        const canvas = document.querySelector('canvas');
-        if (canvas) canvas.addEventListener('click', handleCanvasClick);
-      });
-
-      function handleCanvasClick(e) {
-        // Simple: if any target is being tracked, a tap = open video
-        // More refined: use raycaster result
-        const target = document.querySelector('[mindar-image-target]');
-        if (target && target.object3D && target.object3D.visible) {
-          // Check raycaster intersection via A-Frame
-          const cursor = document.querySelector('a-cursor');
-          if (!cursor) return;
-          const intersected = cursor.components.raycaster &&
-            cursor.components.raycaster.intersectedEls;
-          if (intersected && intersected.length > 0) {
-            openVideo();
-          }
-        }
-      }
     </script>
   </body>
 </html>
