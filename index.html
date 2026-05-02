@@ -56,7 +56,7 @@
         transform: translate(-50%, -50%); /* center the div on the projected point */
         -webkit-tap-highlight-color: rgba(255, 107, 53, 0.3);
         /* Uncomment to debug — shows a red circle on each character: */
-        background: rgba(255,0,0,0.3); border: 2px solid red;
+        /* background: rgba(255,0,0,0.3); border: 2px solid red; */
       }
     </style>
   </head>
@@ -171,38 +171,36 @@
       const scanHint = document.getElementById('scan-hint');
       let   isTracking = false;
 
-      // ── 3D → 2D projection loop ───────────────────────────────────────────────
-      // Every animation frame we:
-      //   1. Get the world position of each anchor entity
-      //   2. Project it through the camera to get NDC (-1..1)
-      //   3. Convert NDC to screen pixels
-      //   4. Move the tap zone div to that pixel position
-      //   5. Scale the tap zone size based on distance (closer = bigger hitbox)
+      // ── 3D → 2D projection + smoothing loop ─────────────────────────────────
+      // Each zone has a "current" smoothed position that lerps toward the
+      // raw projected position every frame. This eliminates tracker jitter
+      // while still following the character accurately.
 
-      const THREE = AFRAME.THREE;
+      const THREE  = AFRAME.THREE;
       const tmpVec = new THREE.Vector3();
+      const camPos = new THREE.Vector3();
+      const ancPos = new THREE.Vector3();
+
+      // LERP factor: 0.0 = frozen, 1.0 = instant (no smoothing)
+      // 0.15 feels smooth but still responsive — raise to 0.25 if too laggy
+      const LERP = 0.15;
+
+      // Smoothed state per zone
+      const smooth = {};
+      for (let i = 1; i <= 6; i++) {
+        smooth[i] = { x: -9999, y: -9999, size: 100, init: false };
+      }
 
       function projectToScreen(anchorEl, camera) {
-        // Get the anchor's world position
-        anchorEl.object3D.getWorldPosition(tmpVec);
-
-        // Project into camera clip space (-1 to +1)
+        anchorEl.object3D.getWorldPosition(ancPos);
+        tmpVec.copy(ancPos);
         tmpVec.project(camera.object3D.children[0] || camera.object3D);
 
-        // Convert to CSS pixels (top-left origin)
-        const x = ( tmpVec.x + 1) / 2 * window.innerWidth;
-        const y = (-tmpVec.y + 1) / 2 * window.innerHeight;
+        const x    = ( tmpVec.x + 1) / 2 * window.innerWidth;
+        const y    = (-tmpVec.y + 1) / 2 * window.innerHeight;
 
-        // Distance-based size: closer = bigger tap area
-        // tmpVec.z after project is in NDC; we use the raw Z before project
-        // Instead, compute distance from camera to anchor in world space
-        const camPos = new THREE.Vector3();
         camera.object3D.getWorldPosition(camPos);
-        const anchorPos = new THREE.Vector3();
-        anchorEl.object3D.getWorldPosition(anchorPos);
-        const dist = camPos.distanceTo(anchorPos);
-
-        // Empirically: at dist=3 → size ~100px, at dist=1 → size ~300px
+        const dist = camPos.distanceTo(ancPos);
         const size = Math.min(Math.max(200 / dist, 60), 400);
 
         return { x, y, size };
@@ -219,12 +217,24 @@
           const zone   = document.getElementById('zone'   + i);
           if (!anchor || !zone) continue;
 
-          const { x, y, size } = projectToScreen(anchor, camera);
+          const raw = projectToScreen(anchor, camera);
+          const s   = smooth[i];
 
-          zone.style.left   = x + 'px';
-          zone.style.top    = y + 'px';
-          zone.style.width  = size + 'px';
-          zone.style.height = size + 'px';
+          if (!s.init) {
+            // First frame: snap immediately so there's no slide-in from (0,0)
+            s.x = raw.x; s.y = raw.y; s.size = raw.size;
+            s.init = true;
+          } else {
+            // Lerp toward raw position each frame
+            s.x    += (raw.x    - s.x)    * LERP;
+            s.y    += (raw.y    - s.y)    * LERP;
+            s.size += (raw.size - s.size) * LERP;
+          }
+
+          zone.style.left   = s.x    + 'px';
+          zone.style.top    = s.y    + 'px';
+          zone.style.width  = s.size + 'px';
+          zone.style.height = s.size + 'px';
         }
 
         requestAnimationFrame(updateTapZones);
@@ -245,6 +255,8 @@
           isTracking = false;
           tapLayer.classList.remove('active');
           scanHint.classList.remove('hidden');
+          // Reset smooth state so zones snap cleanly on next detection
+          for (let i = 1; i <= 6; i++) smooth[i].init = false;
           stopAll();
         });
       });
